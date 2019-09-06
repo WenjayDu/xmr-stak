@@ -32,69 +32,6 @@ R"===(
 #define cryptonight_conceal 14
 #define cryptonight_v8_reversewaltz 17
 
-/* For Mesa clover support */
-#ifdef cl_clang_storage_class_specifiers
-#   pragma OPENCL EXTENSION cl_clang_storage_class_specifiers : enable
-#endif
-
-#ifdef cl_amd_media_ops
-#pragma OPENCL EXTENSION cl_amd_media_ops : enable
-#else
-/* taken from https://www.khronos.org/registry/OpenCL/extensions/amd/cl_amd_media_ops.txt
- * Build-in Function
- *     uintn  amd_bitalign (uintn src0, uintn src1, uintn src2)
- *   Description
- *     dst.s0 =  (uint) (((((ulong)src0.s0) << 32) | (ulong)src1.s0) >> (src2.s0 & 31))
- *     similar operation applied to other components of the vectors.
- *
- * The implemented function is modified because the last is in our case always a scalar.
- * We can ignore the bitwise AND operation.
- */
-inline uint2 amd_bitalign( const uint2 src0, const uint2 src1, const uint src2)
-{
-	uint2 result;
-	result.s0 =  (uint) (((((ulong)src0.s0) << 32) | (ulong)src1.s0) >> (src2));
-	result.s1 =  (uint) (((((ulong)src0.s1) << 32) | (ulong)src1.s1) >> (src2));
-	return result;
-}
-#endif
-
-#ifdef cl_amd_media_ops2
-#pragma OPENCL EXTENSION cl_amd_media_ops2 : enable
-#else
-/* taken from: https://www.khronos.org/registry/OpenCL/extensions/amd/cl_amd_media_ops2.txt
- *     Built-in Function:
- *     uintn amd_bfe (uintn src0, uintn src1, uintn src2)
- *   Description
- *     NOTE: operator >> below represent logical right shift
- *     offset = src1.s0 & 31;
- *     width = src2.s0 & 31;
- *     if width = 0
- *         dst.s0 = 0;
- *     else if (offset + width) < 32
- *         dst.s0 = (src0.s0 << (32 - offset - width)) >> (32 - width);
- *     else
- *         dst.s0 = src0.s0 >> offset;
- *     similar operation applied to other components of the vectors
- */
-inline int amd_bfe(const uint src0, const uint offset, const uint width)
-{
-	/* casts are removed because we can implement everything as uint
-	 * int offset = src1;
-	 * int width = src2;
-	 * remove check for edge case, this function is always called with
-	 * `width==8`
-	 * @code
-	 *   if ( width == 0 )
-	 *      return 0;
-	 * @endcode
-	 */
-	if ( (offset + width) < 32u )
-		return (src0 << (32u - offset - width)) >> (32u - width);
-
-	return src0 >> offset;
-}
-#endif
 
 static const __constant ulong keccakf_rndc[24] =
 {
@@ -128,6 +65,8 @@ static const __constant uchar sbox[256] =
 	0x8C, 0xA1, 0x89, 0x0D, 0xBF, 0xE6, 0x42, 0x68, 0x41, 0x99, 0x2D, 0x0F, 0xB0, 0x54, 0xBB, 0x16
 };
 
+//#include "opencl/wolf-aes.cl"
+XMRSTAK_INCLUDE_WOLF_AES
 
 void keccakf1600(ulong *s)
 {
@@ -259,7 +198,7 @@ inline void keccakf1600_1(ulong st[25])
 	}
 }
 )==="
-R"===(
+	R"===(
 
 void keccakf1600_2(__local ulong *st)
 {
@@ -355,8 +294,6 @@ inline uint getIdx()
 XMRSTAK_INCLUDE_FAST_INT_MATH_V2
 //#include "fast_div_heavy.cl"
 XMRSTAK_INCLUDE_FAST_DIV_HEAVY
-//#include "opencl/wolf-aes.cl"
-XMRSTAK_INCLUDE_WOLF_AES
 //#include "opencl/wolf-skein.cl"
 XMRSTAK_INCLUDE_WOLF_SKEIN
 //#include "opencl/jh.cl"
@@ -435,7 +372,7 @@ inline int4 _mm_alignr_epi8(int4 a, const uint rot)
 #endif
 
 )==="
-R"===(
+	R"===(
 
 void CNKeccak(ulong *output, ulong *input)
 {
@@ -461,8 +398,6 @@ void CNKeccak(ulong *output, ulong *input)
 
 static const __constant uchar rcon[8] = { 0x8d, 0x01, 0x02, 0x04, 0x08, 0x10, 0x20, 0x40 };
 
-#define BYTE(x, y)	(amd_bfe((x), (y) << 3U, 8U))
-
 #define SubWord(inw)		((sbox[BYTE(inw, 3)] << 24) | (sbox[BYTE(inw, 2)] << 16) | (sbox[BYTE(inw, 1)] << 8) | sbox[BYTE(inw, 0)])
 
 void AESExpandKey256(uint *keybuf)
@@ -481,7 +416,7 @@ void AESExpandKey256(uint *keybuf)
 }
 
 )==="
-R"===(
+	R"===(
 
 #define mix_and_propagate(xin) (xin)[(get_local_id(1)) % 8][get_local_id(0)] ^ (xin)[(get_local_id(1) + 1) % 8][get_local_id(0)]
 
@@ -539,6 +474,11 @@ __kernel void JOIN(cn0,ALGO)(__global ulong *input, __global uint4 *Scratchpad, 
 			State[8]  = input[8];
 			State[9]  = input[9];
 			State[10] = input[10];
+			State[11] = input[11];
+			State[12] = input[12];
+			State[13] = input[13];
+			State[14] = input[14];
+			State[15] = input[15];
 
 			((__local uint *)State)[9]  &= 0x00FFFFFFU;
 			((__local uint *)State)[9]  |= (((uint)get_global_id(0)) & 0xFF) << 24;
@@ -550,12 +490,12 @@ __kernel void JOIN(cn0,ALGO)(__global ulong *input, __global uint4 *Scratchpad, 
 			 */
 			((__local uint *)State)[10] |= (((uint)get_global_id(0) >> 8));
 
-			for (int i = 11; i < 25; ++i) {
-			    State[i] = 0x00UL;
-			}
-
 			// Last bit of padding
 			State[16] = 0x8000000000000000UL;
+
+			for (int i = 17; i < 25; ++i) {
+			    State[i] = 0x00UL;
+			}
 
 			keccakf1600_2(State);
 
@@ -637,7 +577,7 @@ __kernel void JOIN(cn0,ALGO)(__global ulong *input, __global uint4 *Scratchpad, 
 }
 
 )==="
-R"===(
+	R"===(
 
 // __NV_CL_C_VERSION checks if NVIDIA opencl is used
 #if((ALGO == cryptonight_monero_v8 || ALGO == cryptonight_v8_reversewaltz) && defined(__NV_CL_C_VERSION))
@@ -928,8 +868,13 @@ __kernel void JOIN(cn1,ALGO) (__global uint4 *Scratchpad, __global ulong *states
 
 )==="
 R"===(
+#if defined(__clang__)
+#	if __has_builtin(__builtin_amdgcn_ds_bpermute)
+#		define HAS_AMD_BPERMUTE  1
+#	endif
+#endif
 
-__attribute__((reqd_work_group_size(8, 8, 1)))
+__attribute__((reqd_work_group_size(8, WORKSIZE, 1)))
 __kernel void JOIN(cn2,ALGO) (__global uint4 *Scratchpad, __global ulong *states,
 
 #if (ALGO == cryptonight_gpu)
@@ -938,88 +883,123 @@ __kernel void JOIN(cn2,ALGO) (__global uint4 *Scratchpad, __global ulong *states
 	__global uint *Branch0, __global uint *Branch1, __global uint *Branch2, __global uint *Branch3, uint Threads)
 #endif
 {
-	__local uint AES0[256], AES1[256], AES2[256], AES3[256];
-	uint ExpandedKey2[40];
-	uint4 text;
+    __local uint AES0[256], AES1[256], AES2[256], AES3[256];
+    uint ExpandedKey2[40];
+    uint4 text;
 
-	const uint gIdx = getIdx();
+    uint gIdx = get_global_id(1) - get_global_offset(1);
+    uint groupIdx = get_local_id(1);
+    uint lIdx = get_local_id(0);
 
-	for (int i = get_local_id(1) * 8 + get_local_id(0); i < 256; i += 8 * 8) {
-		const uint tmp = AES0_C[i];
-		AES0[i] = tmp;
-		AES1[i] = rotate(tmp, 8U);
-		AES2[i] = rotate(tmp, 16U);
-		AES3[i] = rotate(tmp, 24U);
-	}
+    for (int i = groupIdx * 8 + lIdx; i < 256; i += get_local_size(0) * get_local_size(1)) {
+        const uint tmp = AES0_C[i];
+        AES0[i] = tmp;
+        AES1[i] = rotate(tmp, 8U);
+        AES2[i] = rotate(tmp, 16U);
+        AES3[i] = rotate(tmp, 24U);
+    }
 
-	barrier(CLK_LOCAL_MEM_FENCE);
+    barrier(CLK_LOCAL_MEM_FENCE);
 
 #if (ALGO == cryptonight_gpu || ALGO == cryptonight_heavy || ALGO == cryptonight_haven || ALGO == cryptonight_bittube2  || ALGO == cryptonight_superfast)
-	__local uint4 xin1[8][8];
-	__local uint4 xin2[8][8];
+    __local uint4 xin1[WORKSIZE][8];
+    __local uint4 xin2[WORKSIZE][8];
 #endif
 
 #if(COMP_MODE==1)
-	// do not use early return here
-	if(gIdx < Threads)
+    // do not use early return here
+    if(gIdx < Threads)
 #endif
-	{
-		states += 25 * gIdx;
+    {
+        states += 25 * gIdx;
 #if(STRIDED_INDEX==0)
-		Scratchpad += gIdx * (MEMORY >> 4);
+        Scratchpad += gIdx * (MEMORY >> 4);
 #elif(STRIDED_INDEX==1)
-		Scratchpad += gIdx;
+                Scratchpad += gIdx;
 #elif(STRIDED_INDEX==2)
-		Scratchpad += (gIdx / WORKSIZE) * (MEMORY >> 4) * WORKSIZE + MEM_CHUNK * (gIdx % WORKSIZE);
+        Scratchpad += (gIdx / WORKSIZE) * (MEMORY >> 4) * WORKSIZE + MEM_CHUNK * (gIdx % WORKSIZE);
 #elif(STRIDED_INDEX==3)
-		Scratchpad += (gIdx / WORKSIZE) * (MEMORY >> 4) * WORKSIZE + (gIdx % WORKSIZE);
+                Scratchpad += (gIdx / WORKSIZE) * (MEMORY >> 4) * WORKSIZE + (gIdx % WORKSIZE);
 #endif
 
-		#if defined(__Tahiti__) || defined(__Pitcairn__)
+        #if defined(__Tahiti__) || defined(__Pitcairn__)
 
-		for(int i = 0; i < 4; ++i) ((ulong *)ExpandedKey2)[i] = states[i + 4];
-		text = vload4(get_local_id(1) + 4, (__global uint *)states);
+        for(int i = 0; i < 4; ++i) ((ulong *)ExpandedKey2)[i] = states[i + 4];
+        text = vload4(lIdx + 4, (__global uint *)states);
 
-		#else
+        #else
+        text = vload4(lIdx + 4, (__global uint *)states);
+        ((uint8 *)ExpandedKey2)[0] = vload8(1, (__global uint *)states);
 
-		text = vload4(get_local_id(1) + 4, (__global uint *)states);
-		((uint8 *)ExpandedKey2)[0] = vload8(1, (__global uint *)states);
+        #endif
 
-		#endif
+        AESExpandKey256(ExpandedKey2);
+    }
 
-		AESExpandKey256(ExpandedKey2);
-	}
-
-	barrier(CLK_LOCAL_MEM_FENCE);
+    barrier(CLK_LOCAL_MEM_FENCE);
 
 #if (ALGO == cryptonight_gpu || ALGO == cryptonight_heavy || ALGO == cryptonight_haven || ALGO == cryptonight_bittube2 || ALGO == cryptonight_superfast)
-	__local uint4* xin1_store = &xin1[get_local_id(1)][get_local_id(0)];
-	__local uint4* xin1_load = &xin1[(get_local_id(1) + 1) % 8][get_local_id(0)];
-	__local uint4* xin2_store = &xin2[get_local_id(1)][get_local_id(0)];
-	__local uint4* xin2_load = &xin2[(get_local_id(1) + 1) % 8][get_local_id(0)];
-	*xin2_store = (uint4)(0, 0, 0, 0);
+#	if (HAS_AMD_BPERMUTE == 1)
+	int lane = (groupIdx * 8 + ((lIdx + 1) % 8)) << 2;
+	uint4 tmp = (uint4)(0, 0, 0, 0);
+#	else
+    __local uint4* xin1_store = &xin1[groupIdx][lIdx];
+    __local uint4* xin1_load = &xin1[groupIdx][(lIdx + 1) % 8];
+    __local uint4* xin2_store = &xin2[groupIdx][lIdx];
+    __local uint4* xin2_load = &xin2[groupIdx][(lIdx + 1) % 8];
+    *xin2_store = (uint4)(0, 0, 0, 0);
+#	endif
 #endif
 
 #if(COMP_MODE == 1)
-	// do not use early return here
-	if (gIdx < Threads)
+    // do not use early return here
+    if (gIdx < Threads)
 #endif
-	{
+    {
 
 #if (ALGO == cryptonight_gpu || ALGO == cryptonight_heavy || ALGO == cryptonight_haven || ALGO == cryptonight_bittube2 || ALGO == cryptonight_superfast)
+
+#	if	(HAS_AMD_BPERMUTE == 1)
+        #pragma unroll 2
+        for(int i = 0, i1 = lIdx; i < (MEMORY >> 7); ++i, i1 = (i1 + 16) % (MEMORY >> 4))
+        {
+            text ^= Scratchpad[IDX((uint)i1)];
+			text ^= tmp;
+
+            #pragma unroll 10
+            for(int j = 0; j < 10; ++j)
+                text = AES_Round(AES0, AES1, AES2, AES3, text, ((uint4 *)ExpandedKey2)[j]);
+
+            text.s0 ^= __builtin_amdgcn_ds_bpermute(lane, text.s0);
+            text.s1 ^= __builtin_amdgcn_ds_bpermute(lane, text.s1);
+            text.s2 ^= __builtin_amdgcn_ds_bpermute(lane, text.s2);
+            text.s3 ^= __builtin_amdgcn_ds_bpermute(lane, text.s3);
+			//__builtin_amdgcn_s_waitcnt(0);
+            text ^= Scratchpad[IDX((uint)i1 + 8u)];
+
+            #pragma unroll 10
+            for(int j = 0; j < 10; ++j)
+                text = AES_Round(AES0, AES1, AES2, AES3, text, ((uint4 *)ExpandedKey2)[j]);
+            tmp.s0 = __builtin_amdgcn_ds_bpermute(lane, text.s0);
+            tmp.s1 = __builtin_amdgcn_ds_bpermute(lane, text.s1);
+            tmp.s2 = __builtin_amdgcn_ds_bpermute(lane, text.s2);
+            tmp.s3 = __builtin_amdgcn_ds_bpermute(lane, text.s3);
+			//__builtin_amdgcn_s_waitcnt(0);
+        }
+
+        text ^= tmp;
+#	else
+
 		#pragma unroll 2
-		for(int i = 0, i1 = get_local_id(1); i < (MEMORY >> 7); ++i, i1 = (i1 + 16) % (MEMORY >> 4))
+		for(int i = 0, i1 = lIdx; i < (MEMORY >> 7); ++i, i1 = (i1 + 16) % (MEMORY >> 4))
 		{
 			text ^= Scratchpad[IDX((uint)i1)];
 			barrier(CLK_LOCAL_MEM_FENCE);
 			text ^= *xin2_load;
-
 			#pragma unroll 10
 			for(int j = 0; j < 10; ++j)
 			    text = AES_Round(AES0, AES1, AES2, AES3, text, ((uint4 *)ExpandedKey2)[j]);
-
 			*xin1_store = text;
-
 			text ^= Scratchpad[IDX((uint)i1 + 8u)];
 			barrier(CLK_LOCAL_MEM_FENCE);
 			text ^= *xin1_load;
@@ -1031,87 +1011,96 @@ __kernel void JOIN(cn2,ALGO) (__global uint4 *Scratchpad, __global ulong *states
 			*xin2_store = text;
 		}
 
-		barrier(CLK_LOCAL_MEM_FENCE);
-		text ^= *xin2_load;
+        barrier(CLK_LOCAL_MEM_FENCE);
+        text ^= *xin2_load;
+#	endif
 
 #else
-		#pragma unroll 2
-		for (int i = 0; i < (MEMORY >> 7); ++i) {
-			text ^= Scratchpad[IDX((uint)((i << 3) + get_local_id(1)))];
+        #pragma unroll 2
+        for (int i = 0; i < (MEMORY >> 7); ++i)
+        {
+            text ^= Scratchpad[IDX((uint)((i << 3) + lIdx))];
 
-			#pragma unroll 10
-			for(int j = 0; j < 10; ++j)
-			    text = AES_Round(AES0, AES1, AES2, AES3, text, ((uint4 *)ExpandedKey2)[j]);
-		}
+            #pragma unroll 10
+            for(int j = 0; j < 10; ++j)
+                text = AES_Round(AES0, AES1, AES2, AES3, text, ((uint4 *)ExpandedKey2)[j]);
+        }
 #endif
-	}
+    }
 
 #if (ALGO == cryptonight_gpu || ALGO == cryptonight_heavy || ALGO == cryptonight_haven || ALGO == cryptonight_bittube2 || ALGO == cryptonight_superfast)
-	/* Also left over threads performe this loop.
-	 * The left over thread results will be ignored
-	 */
-	#pragma unroll 16
-	for(size_t i = 0; i < 16; i++)
-	{
-		#pragma unroll 10
-		for (int j = 0; j < 10; ++j) {
-			text = AES_Round(AES0, AES1, AES2, AES3, text, ((uint4 *)ExpandedKey2)[j]);
-		}
-
-		barrier(CLK_LOCAL_MEM_FENCE);
-		*xin1_store = text;
-		barrier(CLK_LOCAL_MEM_FENCE);
-		text ^= *xin1_load;
-	}
+    /* Also left over threads performe this loop.
+     * The left over thread results will be ignored
+     */
+    #pragma unroll 16
+    for(size_t i = 0; i < 16; i++)
+    {
+        #pragma unroll 10
+        for (int j = 0; j < 10; ++j) {
+            text = AES_Round(AES0, AES1, AES2, AES3, text, ((uint4 *)ExpandedKey2)[j]);
+        }
+#if (HAS_AMD_BPERMUTE == 1)
+	    text.s0 ^= __builtin_amdgcn_ds_bpermute(lane, text.s0);
+        text.s1 ^= __builtin_amdgcn_ds_bpermute(lane, text.s1);
+        text.s2 ^= __builtin_amdgcn_ds_bpermute(lane, text.s2);
+        text.s3 ^= __builtin_amdgcn_ds_bpermute(lane, text.s3);
+		//__builtin_amdgcn_s_waitcnt(0);
+#else
+        barrier(CLK_LOCAL_MEM_FENCE);
+        *xin1_store = text;
+        barrier(CLK_LOCAL_MEM_FENCE);
+        text ^= *xin1_load;
+#endif
+    }
 #endif
 
-	__local ulong State_buf[8 * 25];
+    __local ulong State_buf[8 * 25];
 #if(COMP_MODE==1)
-	// do not use early return here
-	if(gIdx < Threads)
+    // do not use early return here
+    if(gIdx < Threads)
 #endif
-	{
-		vstore2(as_ulong2(text), get_local_id(1) + 4, states);
-	}
+    {
+        vstore2(as_ulong2(text), lIdx + 4, states);
+    }
 
-	barrier(CLK_GLOBAL_MEM_FENCE);
+    barrier(CLK_GLOBAL_MEM_FENCE);
 
 #if(COMP_MODE==1)
-	// do not use early return here
-	if(gIdx < Threads)
+    // do not use early return here
+    if(gIdx < Threads)
 #endif
-	{
-		if(!get_local_id(1))
-		{
-			__local ulong* State = State_buf + get_local_id(0) * 25;
+    {
+        if(!lIdx)
+        {
+            __local ulong* State = State_buf + groupIdx * 25;
 
-			for(int i = 0; i < 25; ++i) State[i] = states[i];
+            for(int i = 0; i < 25; ++i) State[i] = states[i];
 
-			keccakf1600_2(State);
+            keccakf1600_2(State);
 
 #if (ALGO == cryptonight_gpu)
 			if(State[3] <= Target)
 			{
 				ulong outIdx = atomic_inc(output + 0xFF);
 				if(outIdx < 0xFF)
-					output[outIdx] = get_global_id(0);
+					output[outIdx] = get_global_id(1);
 			}
 #else
-			for(int i = 0; i < 25; ++i) states[i] = State[i];
+            for(int i = 0; i < 25; ++i) states[i] = State[i];
 
-			uint StateSwitch = State[0] & 3;
-			__global uint *destinationBranch1 = StateSwitch == 0 ? Branch0 : Branch1;
-			__global uint *destinationBranch2 = StateSwitch == 2 ? Branch2 : Branch3;
-			__global uint *destinationBranch = StateSwitch < 2 ? destinationBranch1 : destinationBranch2;
-			destinationBranch[atomic_inc(destinationBranch + Threads)] = gIdx;
+            uint StateSwitch = State[0] & 3;
+            __global uint *destinationBranch1 = StateSwitch == 0 ? Branch0 : Branch1;
+            __global uint *destinationBranch2 = StateSwitch == 2 ? Branch2 : Branch3;
+            __global uint *destinationBranch = StateSwitch < 2 ? destinationBranch1 : destinationBranch2;
+            destinationBranch[atomic_inc(destinationBranch + Threads)] = gIdx;
 #endif
-		}
-	}
-	mem_fence(CLK_GLOBAL_MEM_FENCE);
+        }
+    }
+    mem_fence(CLK_GLOBAL_MEM_FENCE);
 }
 
 )==="
-R"===(
+	R"===(
 
 #define VSWAP8(x)	(((x) >> 56) | (((x) >> 40) & 0x000000000000FF00UL) | (((x) >> 24) & 0x0000000000FF0000UL) \
 		  | (((x) >>  8) & 0x00000000FF000000UL) | (((x) <<  8) & 0x000000FF00000000UL) \
@@ -1361,13 +1350,48 @@ __kernel void Groestl(__global ulong *states, __global uint *BranchBuf, __global
 		states += 25 * BranchBuf[idx];
 
 		ulong State[8] = { 0UL, 0UL, 0UL, 0UL, 0UL, 0UL, 0UL, 0x0001000000000000UL };
-#if defined(__clang__) && !defined(__NV_CL_C_VERSION)
+#if defined(__clang__) && !defined(__NV_CL_C_VERSION) && (IS_WINDOWS_OS != 1)
 		// on ROCM we need volatile for AMD RX5xx cards to avoid invalid shares
 		volatile
 #endif
 		ulong H[8], M[8];
 
-		for (uint i = 0; i < 3; ++i) {
+		// BUG: AMD driver 19.7.X crashs if this is written as loop
+		// Thx AMD for so bad software
+		uint i = 0;
+		{
+			((ulong8 *)M)[0] = vload8(i, states);
+
+			for (uint x = 0; x < 8; ++x) {
+			    H[x] = M[x] ^ State[x];
+			}
+
+			PERM_SMALL_P(H);
+			PERM_SMALL_Q(M);
+
+			for (uint x = 0; x < 8; ++x)
+			{
+			    State[x] ^= H[x] ^ M[x];
+			}
+		}
+		i = 1;
+		{
+			((ulong8 *)M)[0] = vload8(i, states);
+
+			for (uint x = 0; x < 8; ++x) {
+			    H[x] = M[x] ^ State[x];
+			}
+
+			PERM_SMALL_P(H);
+			PERM_SMALL_Q(M);
+
+			for (uint x = 0; x < 8; ++x)
+			{
+			    State[x] ^= H[x] ^ M[x];
+			}
+		}
+		i = 2;
+		{
 			((ulong8 *)M)[0] = vload8(i, states);
 
 			for (uint x = 0; x < 8; ++x) {

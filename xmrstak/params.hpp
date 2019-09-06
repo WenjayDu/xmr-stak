@@ -1,6 +1,7 @@
 #pragma once
 
 #include "xmrstak/misc/environment.hpp"
+#include "xmrstak/misc/home_dir.hpp"
 
 #include <string>
 
@@ -24,6 +25,8 @@ struct params
 	bool AMDCache;
 	bool useNVIDIA;
 	bool useCPU;
+	std::string amdGpus;
+	std::string nvidiaGpus;
 	// user selected OpenCL vendor
 	std::string openCLVendor;
 
@@ -45,8 +48,12 @@ struct params
 	std::string configFile;
 	std::string configFilePools;
 	std::string configFileAMD;
+	std::string rootAMDCacheDir;
 	std::string configFileNVIDIA;
 	std::string configFileCPU;
+
+	std::string outputFile;
+	int h_print_time = -1;
 
 	bool allowUAC = true;
 	std::string minerArg0;
@@ -68,10 +75,11 @@ struct params
 		configFile("config.txt"),
 		configFilePools("pools.txt"),
 		configFileAMD("amd.txt"),
+		rootAMDCacheDir(get_home() + "/.openclcache/"),
 		configFileCPU("cpu.txt"),
 		configFileNVIDIA("nvidia.txt")
-	{}
-
+	{
+	}
 };
 
 } // namespace xmrstak
